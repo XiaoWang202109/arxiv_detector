@@ -10,11 +10,14 @@ import os
 URL = "https://arxiv.org/list/cond-mat/new"
 CHECK_INTERVAL = 60 
 RUN_LIMIT = 3 * 60 * 60  # 最多运行3小时
-EMAIL_TO = os.environ.get("EMAIL_TO") 
 EMAIL_FROM = os.environ.get("EMAIL_FROM")   #你的 QQ 邮箱账号，用来登录 SMTP
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
 SMTP_SERVER = "smtp.qq.com"
 SMTP_PORT = 465
+EMAIL_TO_LIST = [
+    os.environ.get("EMAIL_TO"),
+    os.environ.get("EMAIL_TO_2")
+]
 
 def today_has_update():
     """检查网页是否有当天更新"""
@@ -38,11 +41,11 @@ def send_email(subject, content):
     msg = MIMEText(content, "plain", "utf-8")
     msg["Subject"] = subject
     msg["From"] = EMAIL_FROM
-    msg["To"] = EMAIL_TO
+    msg["To"] = ", ".join(EMAIL_TO_LIST)
 
-    with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
-        server.login(EMAIL_FROM, EMAIL_PASS)
-        server.send_message(msg)
+    with smtplib.SMTP_SSL("smtp.qq.com", 465) as server:
+         server.login(EMAIL_FROM, EMAIL_PASS)
+         server.sendmail(EMAIL_FROM, EMAIL_TO_LIST, msg.as_string())
     print(f"邮件已发送：{subject}")
 
 def main():
