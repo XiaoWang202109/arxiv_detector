@@ -16,16 +16,23 @@ EMAIL_PASS = os.environ.get("EMAIL_PASS")
 SMTP_SERVER = "smtp.qq.com"
 SMTP_PORT = 465
 
-def get_latest_title():
+def today_has_update():
+    """检查网页是否有当天更新"""
     try:
         response = requests.get(URL, timeout=10)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
         header = soup.find("h3")
-        return header.text.strip() if header else None
+        if not header:
+            return False, None
+        # header.text 示例: "Thu, 30 Oct 2025 (25 new submissions)"
+        date_str = header.text.split("(")[0].strip()  # "Thu, 30 Oct 2025"
+        header_date = datetime.strptime(date_str, "%a, %d %b %Y").date()
+        today = datetime.now().date()
+        return header_date == today, header.text.strip()
     except Exception as e:
         print("请求失败:", e)
-        return None
+        return False, None
 
 def send_email(subject, content):
     msg = MIMEText(content, "plain", "utf-8")
@@ -40,21 +47,21 @@ def send_email(subject, content):
 
 def main():
     start_time = datetime.now()
-    last_title = None
+    already_sent = False
 
-    print(f"[{datetime.now()}] 开始检测 arXiv 更新...")
+    print(f"[{datetime.now()}] 开始检测 arXiv 当天更新...")
     while (datetime.now() - start_time).seconds < RUN_LIMIT:
-        title = get_latest_title()
-        if title and title != last_title:
-            last_title = title
-            send_email("ArXiv cond-mat 有新更新！", f"新标题：{title}\n{URL}")
-            return
+        has_update, header_text = today_has_update()
+        if has_update and not already_sent:
+            send_email("ArXiv cond-mat 当天有更新 ✅", f"更新标题: {header_text}\n{URL}")
+            already_sent = True
+            break
         else:
-            print(f"[{datetime.now()}] 无更新，等待下一次检查...")
+            print(f"[{datetime.now()}] 今日暂无更新，等待下一次检查...")
             time.sleep(CHECK_INTERVAL)
 
-    # 超时仍无更新
-    send_email("ArXiv 检测结果", "截至 3 小时未检测到新更新。")
+    if not already_sent:
+        send_email("ArXiv 当天更新检测结果", "截至 3 小时未检测到今日更新。")
 
 if __name__ == "__main__":
     main()
