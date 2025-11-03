@@ -14,10 +14,7 @@ EMAIL_FROM = os.environ.get("EMAIL_FROM")   #你的 QQ 邮箱账号，用来登�
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
 SMTP_SERVER = "smtp.qq.com"
 SMTP_PORT = 465
-EMAIL_TO_LIST = [
-    os.environ.get("EMAIL_TO"),
-    os.environ.get("EMAIL_TO_2")
-]
+EMAIL_TO   = os.environ.get("EMAIL_TO")
 
 def today_has_update():
     response = requests.get(URL)
@@ -40,11 +37,7 @@ def send_email(subject, content):
     msg = MIMEText(content, "plain", "utf-8")
     msg["Subject"] = subject
     msg["From"] = EMAIL_FROM
-    valid_emails = [e for e in EMAIL_TO_LIST if isinstance(e, str) and e.strip()]
-    if not valid_emails:
-        print("No valid recipient email found, skipping send_email.")
-        return
-    msg["To"] = ", ".join(valid_emails)
+    msg["To"] = EMAIL_TO
     with smtplib.SMTP_SSL("smtp.qq.com", 465) as server:
          server.login(EMAIL_FROM, EMAIL_PASS)
          server.sendmail(EMAIL_FROM, EMAIL_TO_LIST, msg.as_string())
@@ -70,4 +63,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    print("EMAIL_TO_LIST:", EMAIL_TO_LIST)
