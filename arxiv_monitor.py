@@ -14,8 +14,8 @@ EMAIL_FROM = os.environ.get("EMAIL_FROM")   #你的 QQ 邮箱账号，用来登�
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
 SMTP_SERVER = "smtp.qq.com"
 SMTP_PORT = 465
-EMAIL_TO   = os.environ.get("EMAIL_TO")
-
+EMAIL_TO   = os.environ.get("EMAIL_TO","EMAIL_TO_2")
+EMAIL_TO_LIST = [e.strip() for e in EMAIL_TO.split(",") if e.strip()]
 def today_has_update():
     response = requests.get(URL)
     soup = BeautifulSoup(response.text, "html.parser")
@@ -34,14 +34,20 @@ def today_has_update():
         return False, text
 
 def send_email(subject, content):
+    if not EMAIL_TO_LIST:
+        print("没有有效的收件人邮箱，跳过发送邮件。")
+        return
     msg = MIMEText(content, "plain", "utf-8")
     msg["Subject"] = subject
     msg["From"] = EMAIL_FROM
-    msg["To"] = EMAIL_TO
-    with smtplib.SMTP_SSL("smtp.qq.com", 465) as server:
-         server.login(EMAIL_FROM, EMAIL_PASS)
-         server.send_message(msg)
-    print(f"邮件已发送：{subject}")
+    msg["To"] = ", ".join(EMAIL_TO_LIST)
+    try:
+        with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
+            server.login(EMAIL_FROM, EMAIL_PASS)
+            server.send_message(msg)
+        print(f"邮件已发送：{subject}，收件人：{EMAIL_TO_LIST}")
+    except Exception as e:
+        print("发送邮件失败:", e)
 
 def main():
     start_time = datetime.now()
