@@ -12,10 +12,11 @@ CHECK_INTERVAL = 60
 RUN_LIMIT = 3 * 60 * 60  # 最多运行3小时
 EMAIL_FROM = os.environ.get("EMAIL_FROM")   #你的 QQ 邮箱账号，用来登录 SMTP
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
+EMAIL_TO = os.environ.get("EMAIL_TO")
+EMAIL_TO_2 = os.environ.get("EMAIL_TO_2")
 SMTP_SERVER = "smtp.qq.com"
 SMTP_PORT = 465
-EMAIL_TO   = os.environ.get("EMAIL_TO","EMAIL_TO_2")
-EMAIL_TO_LIST = [e.strip() for e in EMAIL_TO.split(",") if e.strip()]
+EMAIL_TO_LIST = [EMAIL_TO,EMAIL_TO_2]
 def today_has_update():
     response = requests.get(URL)
     soup = BeautifulSoup(response.text, "html.parser")
@@ -40,11 +41,11 @@ def send_email(subject, content):
     msg = MIMEText(content, "plain", "utf-8")
     msg["Subject"] = subject
     msg["From"] = EMAIL_FROM
-    msg["To"] = ";".join(EMAIL_TO_LIST)
+    msg["To"] = ", ".join(EMAIL_TO_LIST)
     try:
         with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
             server.login(EMAIL_FROM, EMAIL_PASS)
-            server.send_message(msg)
+            server.sendmail(EMAIL_FROM, EMAIL_TO_LIST, msg.as_string())
         print(f"邮件已发送：{subject}，收件人：{EMAIL_TO_LIST}")
     except Exception as e:
         print("发送邮件失败:", e)
