@@ -26,5 +26,6 @@ jobs:
         EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
         EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
         EMAIL_TO: ${{ secrets.EMAIL_TO }}
+        EMAIL_TO_2: ${{ secrets.EMAIL_TO_2 }}
       run: python arxiv_monitor.py
 
