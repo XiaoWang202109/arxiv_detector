@@ -40,8 +40,11 @@ def send_email(subject, content):
     msg = MIMEText(content, "plain", "utf-8")
     msg["Subject"] = subject
     msg["From"] = EMAIL_FROM
-    msg["To"] = ", ".join(EMAIL_TO_LIST)
-
+    valid_emails = [e for e in EMAIL_TO_LIST if isinstance(e, str) and e.strip()]
+    if not valid_emails:
+        print("No valid recipient email found, skipping send_email.")
+        return
+    msg["To"] = ", ".join(valid_emails)
     with smtplib.SMTP_SSL("smtp.qq.com", 465) as server:
          server.login(EMAIL_FROM, EMAIL_PASS)
          server.sendmail(EMAIL_FROM, EMAIL_TO_LIST, msg.as_string())
@@ -67,3 +70,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    print("EMAIL_TO_LIST:", EMAIL_TO_LIST)
