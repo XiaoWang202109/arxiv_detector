@@ -20,22 +20,21 @@ EMAIL_TO_LIST = [
 ]
 
 def today_has_update():
-    """检查网页是否有当天更新"""
-    try:
-        response = requests.get(URL, timeout=10)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, "html.parser")
-        header = soup.find("h3")
-        if not header:
-            return False, None
-        # header.text 示例: "Thu, 30 Oct 2025 (25 new submissions)"
-        date_str = header.text.split("(")[0].strip()  # "Thu, 30 Oct 2025"
-        header_date = datetime.strptime(date_str, "%a, %d %b %Y").date()
-        today = datetime.now().date()
-        return header_date == today, header.text.strip()
-    except Exception as e:
-        print("请求失败:", e)
+    response = requests.get(URL)
+    soup = BeautifulSoup(response.text, "html.parser")
+    header = soup.find("h3")
+    if not header:
         return False, None
+    # header.text 示例: "Showing new listings for Monday, 3 November 2025"
+    text = header.text.strip()
+    try:
+        date_str = text.replace("Showing new listings for ", "")  # "Monday, 3 November 2025"
+        header_date = datetime.strptime(date_str, "%A, %d %B %Y").date()
+        today = datetime.now().date()
+        return header_date == today, text
+    except Exception as e:
+        print("日期解析失败:", e)
+        return False, text
 
 def send_email(subject, content):
     msg = MIMEText(content, "plain", "utf-8")
