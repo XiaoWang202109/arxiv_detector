@@ -4,14 +4,15 @@ import smtplib
 from email.mime.text import MIMEText
 from datetime import datetime, timedelta
 import time
+import os
 
 # ==== 用户设置 ====
 URL = "https://arxiv.org/list/cond-mat/new"
 CHECK_INTERVAL = 60 
 RUN_LIMIT = 3 * 60 * 60  # 最多运行3小时
-EMAIL_TO = "3473526031@qq.com"  
-EMAIL_FROM = "3473526031@qq.com"   #你的 QQ 邮箱账号，用来登录 SMTP
-EMAIL_PASS = "wpbvuiqpjjmxcjhh"
+EMAIL_TO = os.environ.get("EMAIL_TO") 
+EMAIL_FROM = os.environ.get("EMAIL_FROM")   #你的 QQ 邮箱账号，用来登录 SMTP
+EMAIL_PASS = os.environ.get("EMAIL_PASS")
 SMTP_SERVER = "smtp.qq.com"
 SMTP_PORT = 465
 
