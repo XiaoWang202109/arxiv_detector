@@ -40,7 +40,7 @@ def send_email(subject, content):
     msg["To"] = EMAIL_TO
     with smtplib.SMTP_SSL("smtp.qq.com", 465) as server:
          server.login(EMAIL_FROM, EMAIL_PASS)
-         server.sendmail(EMAIL_FROM, EMAIL_TO_LIST, msg.as_string())
+         server.send_message(msg)
     print(f"邮件已发送：{subject}")
 
 def main():
