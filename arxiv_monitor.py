@@ -40,7 +40,7 @@ def send_email(subject, content):
     msg = MIMEText(content, "plain", "utf-8")
     msg["Subject"] = subject
     msg["From"] = EMAIL_FROM
-    msg["To"] = ", ".join(EMAIL_TO_LIST)
+    msg["To"] = ",".join(EMAIL_TO_LIST)
     try:
         with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
             server.login(EMAIL_FROM, EMAIL_PASS)
