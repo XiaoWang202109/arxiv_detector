@@ -65,8 +65,6 @@ def main():
         else:
             print(f"[{datetime.now()}] 今日暂无更新，等待下一次检查...")
             time.sleep(CHECK_INTERVAL)
-        else:
-            send_email("ArXiv 检测任务执行完毕", "✅ 今天脚本运行完成，但未检测到更新。")
 
     if not already_sent:
         send_email("ArXiv 当天更新检测结果", "截至 3 小时未检测到今日更新。")
