@@ -8,7 +8,7 @@ import os
 
 # ==== 用户设置 ====
 URL = "https://arxiv.org/list/cond-mat/new"
-CHECK_INTERVAL = 60 
+CHECK_INTERVAL = 120 
 RUN_LIMIT = 3 * 60 * 60  # 最多运行3小时
 EMAIL_FROM = os.environ.get("EMAIL_FROM")   #你的 QQ 邮箱账号，用来登录 SMTP
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
@@ -17,6 +17,7 @@ EMAIL_TO_2 = os.environ.get("EMAIL_TO_CRK")
 SMTP_SERVER = "smtp.qq.com"
 SMTP_PORT = 465
 EMAIL_TO_LIST = [EMAIL_TO,EMAIL_TO_2]
+print(f"当前系统时间（UTC）: {datetime.utcnow()}  => 北京时间: {datetime.now()}")
 def today_has_update():
     response = requests.get(URL)
     soup = BeautifulSoup(response.text, "html.parser")
@@ -64,6 +65,8 @@ def main():
         else:
             print(f"[{datetime.now()}] 今日暂无更新，等待下一次检查...")
             time.sleep(CHECK_INTERVAL)
+        else:
+            send_email("ArXiv 检测任务执行完毕", "✅ 今天脚本运行完成，但未检测到更新。")
 
     if not already_sent:
         send_email("ArXiv 当天更新检测结果", "截至 3 小时未检测到今日更新。")
