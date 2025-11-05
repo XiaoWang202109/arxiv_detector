@@ -2,7 +2,7 @@ name: ArXiv Monitor
 
 on:
   schedule:
-    - cron: '43 3 * * 1-5'  # UTC 1:20 = 北京时间 9:20  分 时 日 月 星期
+    - cron: '50 3 * * 1-5'  # UTC 1:20 = 北京时间 9:20  分 时 日 月 星期
   workflow_dispatch:   # 可手动触发测试
 
 jobs:
