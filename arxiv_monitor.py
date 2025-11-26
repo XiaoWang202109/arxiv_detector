@@ -9,7 +9,7 @@ import os
 # ==== 用户设置 ====
 URL = "https://arxiv.org/list/cond-mat/new"
 CHECK_INTERVAL = 120 
-RUN_LIMIT = 3 * 60 * 60  # 最多运行3小时
+RUN_LIMIT = 6 * 60 * 60  # 最多运行6小时
 EMAIL_FROM = os.environ.get("EMAIL_FROM")   #你的 QQ 邮箱账号，用来登录 SMTP
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
 EMAIL_TO = os.environ.get("EMAIL_TO")
