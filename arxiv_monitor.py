@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 import smtplib
 from email.mime.text import MIMEText
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import time
 import os
 
@@ -17,7 +18,7 @@ EMAIL_TO_2 = os.environ.get("EMAIL_TO_CRK")
 SMTP_SERVER = "smtp.qq.com"
 SMTP_PORT = 465
 EMAIL_TO_LIST = [EMAIL_TO,EMAIL_TO_2]
-print(f"当前系统时间（UTC）: {datetime.utcnow()}  => 北京时间: {datetime.now()}")
+print(f"当前系统时间（UTC）: {datetime.now(ZoneInfo('UTC'))}  => 北京时间: {datetime.now(ZoneInfo('Asia/Shanghai'))}")
 def today_has_update():
     response = requests.get(URL)
     soup = BeautifulSoup(response.text, "html.parser")
@@ -29,7 +30,7 @@ def today_has_update():
     try:
         date_str = text.replace("Showing new listings for ", "")  # "Monday, 3 November 2025"
         header_date = datetime.strptime(date_str, "%A, %d %B %Y").date()
-        today = datetime.now().date()
+        today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
         return header_date == today, text
     except Exception as e:
         print("日期解析失败:", e)
