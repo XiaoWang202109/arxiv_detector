@@ -1,0 +1,332 @@
+import argparse
+import os
+import smtplib
+import time
+import unicodedata
+from dataclasses import dataclass
+from datetime import datetime
+from email.mime.text import MIMEText
+from typing import Iterable
+from urllib.parse import urljoin
+from zoneinfo import ZoneInfo
+
+import requests
+from bs4 import BeautifulSoup
+
+
+# ==== 用户设置 ====
+URL = "https://arxiv.org/list/cond-mat/new"
+CHECK_INTERVAL = 120
+RUN_LIMIT = 6 * 60 * 60  # 最多运行6小时
+
+EMAIL_FROM = os.environ.get("EMAIL_FROM")  # 你的 QQ 邮箱账号，用来登录 SMTP
+EMAIL_PASS = os.environ.get("EMAIL_PASS")
+EMAIL_TO = os.environ.get("EMAIL_TO")
+EMAIL_TO_2 = os.environ.get("EMAIL_TO_CRK")
+SMTP_SERVER = "smtp.qq.com"
+SMTP_PORT = 465
+
+# 之后想到新的关键词，直接追加到这个列表里即可。
+KEYWORDS = [
+    "TMD",
+    "MoSe2",
+    "WSe2",
+    "MoTe2",
+    "WS2",
+    "MoS2",
+    "heterostructure",
+    "twisted",
+    "moire",
+    "Yao Wang",
+    "kenji",
+    "Kenji Watanabe",
+    "Takashi Taniguchi",
+    "jie gu",
+    "xiaodong xu",
+    "Kin Fai Mak",
+    "Jie Shan",
+    "Feng Wang",
+    "Allan H. MacDonald",
+    "MacDonald",
+    "Fengcheng Wu",
+    "Xiaoyang Zhu",
+    "Sufei Shi",
+    "YongTao Cui",
+    "Chenhao Jin",
+    "Jun Yan",
+    "Di Xiao",
+    "Liang Fu",
+    "Hongyi Yu",
+    "Ting Cao",
+    "Libai Huang",
+    "Anlian Pan",
+    "Brian D.Gerardot",
+    "Brian D. Gerardot",
+    "Imamoglu",
+    "Chun Hung Lui",
+    "Tony F. Heinz",
+    "Long Ju",
+    "TingXin Li",
+    "Kaifei Kang",
+    "Weibo Gao",
+    "Andrea F. Young",
+    "Eric Anderson",
+    "Jiaqi Cai",
+    "Heonjoon Park",
+    "Xiaoxue Liu",
+    "Yuanbo Zhang",
+    "Ziliang Ye",
+]
+
+
+@dataclass
+class ArxivPaper:
+    index: str
+    arxiv_id: str
+    title: str
+    authors: str
+    abstract_text: str
+    abs_url: str
+    pdf_url: str
+    matched_keywords: list[str]
+
+
+def fetch_soup() -> BeautifulSoup:
+    response = requests.get(
+        URL,
+        timeout=30,
+        headers={"User-Agent": "arxiv-cond-mat-monitor/1.0"},
+    )
+    response.raise_for_status()
+    return BeautifulSoup(response.text, "html.parser")
+
+
+def parse_header_date(header_text: str):
+    date_str = header_text.replace("Showing new listings for ", "")
+    return datetime.strptime(date_str, "%A, %d %B %Y").date()
+
+
+def get_today_update_status(soup: BeautifulSoup):
+    header = soup.find("h3")
+    if not header:
+        return False, None
+
+    header_text = header.get_text(" ", strip=True)
+    try:
+        header_date = parse_header_date(header_text)
+        today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+        return header_date == today, header_text
+    except Exception as exc:
+        print("日期解析失败:", exc)
+        return False, header_text
+
+
+def clean_label_text(text: str, label: str) -> str:
+    text = " ".join(text.split())
+    if text.lower().startswith(label.lower()):
+        return text[len(label) :].strip()
+    return text
+
+
+def unique_keep_order(items: Iterable[str]) -> list[str]:
+    seen = set()
+    result = []
+    for item in items:
+        normalized = item.strip()
+        if not normalized:
+            continue
+        key = normalized.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(normalized)
+    return result
+
+
+def normalize_for_search(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", text.casefold())
+    return "".join(char for char in normalized if not unicodedata.combining(char))
+
+
+def find_keywords(search_text: str) -> list[str]:
+    lowered = normalize_for_search(search_text)
+    return unique_keep_order(
+        keyword for keyword in KEYWORDS if normalize_for_search(keyword) in lowered
+    )
+
+
+def parse_papers(soup: BeautifulSoup) -> list[ArxivPaper]:
+    dl = soup.find("dl")
+    if not dl:
+        return []
+
+    papers = []
+    seen_arxiv_ids = set()
+    entries = zip(dl.find_all("dt"), dl.find_all("dd"))
+
+    for dt, dd in entries:
+        index_link = dt.find("a", href=False)
+        index = index_link.get_text(" ", strip=True) if index_link else ""
+
+        abs_link = dt.find("a", href=lambda href: href and href.startswith("/abs/"))
+        if not abs_link:
+            continue
+
+        arxiv_id = abs_link.get_text(" ", strip=True).replace("arXiv:", "").strip()
+        if not arxiv_id or arxiv_id in seen_arxiv_ids:
+            continue
+        seen_arxiv_ids.add(arxiv_id)
+
+        title_tag = dd.find(class_="list-title")
+        authors_tag = dd.find(class_="list-authors")
+
+        title = clean_label_text(
+            title_tag.get_text(" ", strip=True) if title_tag else "",
+            "Title:",
+        )
+        authors = authors_tag.get_text(" ", strip=True) if authors_tag else ""
+
+        abstract_parts = []
+        for tag in dd.find_all(class_=["list-comments", "list-journal-ref", "list-subjects"]):
+            tag.extract()
+        for text in dd.stripped_strings:
+            abstract_parts.append(text)
+        abstract_text = " ".join(abstract_parts)
+
+        search_text = f"{title}\n{authors}\n{abstract_text}"
+        matched_keywords = find_keywords(search_text)
+
+        papers.append(
+            ArxivPaper(
+                index=index,
+                arxiv_id=arxiv_id,
+                title=title,
+                authors=authors,
+                abstract_text=abstract_text,
+                abs_url=urljoin(URL, f"/abs/{arxiv_id}"),
+                pdf_url=f"https://arxiv.org/pdf/{arxiv_id}#zoom=200",
+                matched_keywords=matched_keywords,
+            )
+        )
+
+    return papers
+
+
+def build_email_content(header_text: str, papers: list[ArxivPaper]) -> tuple[str, str]:
+    matched = [paper for paper in papers if paper.matched_keywords]
+
+    if matched:
+        subject = f"ArXiv cond-mat 今日更新，关键词命中 {len(matched)} 篇"
+    else:
+        subject = "ArXiv cond-mat 今日有更新，但暂无关键词命中"
+
+    lines = [
+        f"更新标题: {header_text}",
+        f"页面链接: {URL}",
+        f"本次共解析到 {len(papers)} 篇新文献。",
+        "",
+    ]
+
+    if not matched:
+        lines.append("已检测到今日更新，但没有文献命中当前关键词列表。")
+        return subject, "\n".join(lines)
+
+    lines.append("命中关键词的文献如下：")
+    lines.append("")
+    for number, paper in enumerate(matched, start=1):
+        lines.extend(
+            [
+                f"{number}. {paper.index} arXiv:{paper.arxiv_id}",
+                f"标题: {paper.title}",
+                f"作者: {paper.authors}",
+                f"命中关键词: {', '.join(paper.matched_keywords)}",
+                f"PDF: {paper.pdf_url}",
+                f"摘要页: {paper.abs_url}",
+                "",
+            ]
+        )
+
+    return subject, "\n".join(lines).strip()
+
+
+def get_email_recipients() -> list[str]:
+    return [email for email in [EMAIL_TO, EMAIL_TO_2] if email]
+
+
+def send_email(subject: str, content: str):
+    recipients = get_email_recipients()
+    if not EMAIL_FROM or not EMAIL_PASS or not recipients:
+        print("邮箱账号、授权码或收件人不完整，跳过发送邮件。")
+        print("邮件主题:", subject)
+        print("邮件内容:\n", content)
+        return
+
+    msg = MIMEText(content, "plain", "utf-8")
+    msg["Subject"] = subject
+    msg["From"] = EMAIL_FROM
+    msg["To"] = ", ".join(recipients)
+
+    try:
+        with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
+            server.login(EMAIL_FROM, EMAIL_PASS)
+            server.sendmail(EMAIL_FROM, recipients, msg.as_string())
+        print(f"邮件已发送：{subject}，收件人：{recipients}")
+    except Exception as exc:
+        print("发送邮件失败:", exc)
+
+
+def check_once():
+    soup = fetch_soup()
+    has_update, header_text = get_today_update_status(soup)
+    if not has_update:
+        return False, header_text, []
+    return True, header_text, parse_papers(soup)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Monitor arXiv cond-mat new papers.")
+    parser.add_argument(
+        "--test-send",
+        action="store_true",
+        help="抓取当前页面并立即发送一封测试邮件，不检查是否为当天更新。",
+    )
+    args = parser.parse_args()
+
+    if args.test_send:
+        soup = fetch_soup()
+        _, header_text = get_today_update_status(soup)
+        papers = parse_papers(soup)
+        subject, content = build_email_content(header_text or "arXiv cond-mat 当前页面", papers)
+        send_email("[测试] " + subject, content)
+        return
+
+    start_time = datetime.now()
+    already_sent = False
+
+    print(f"当前系统时间（UTC）: {datetime.now(ZoneInfo('UTC'))}")
+    print(f"北京时间: {datetime.now(ZoneInfo('Asia/Shanghai'))}")
+    print(f"[{datetime.now()}] 开始检测 arXiv cond-mat 当天更新和关键词...")
+
+    while (datetime.now() - start_time).total_seconds() < RUN_LIMIT:
+        try:
+            has_update, header_text, papers = check_once()
+        except Exception as exc:
+            print(f"[{datetime.now()}] 检查失败，等待下一次重试: {exc}")
+            time.sleep(CHECK_INTERVAL)
+            continue
+
+        if has_update and not already_sent:
+            subject, content = build_email_content(header_text, papers)
+            send_email(subject, content)
+            already_sent = True
+            break
+
+        print(f"[{datetime.now()}] 今日暂无更新，等待下一次检查...")
+        time.sleep(CHECK_INTERVAL)
+
+    if not already_sent:
+        send_email("ArXiv 当天更新检测结果", "截至运行时间上限，未检测到今日更新。")
+
+
+if __name__ == "__main__":
+    main()
