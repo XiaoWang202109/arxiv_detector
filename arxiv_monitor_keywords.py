@@ -34,8 +34,6 @@ KEYWORDS = [
     "MoTe2",
     "WS2",
     "MoS2",
-    "heterostructure",
-    "twisted",
     "moire",
     "Yao Wang",
     "kenji",
