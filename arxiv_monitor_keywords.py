@@ -45,7 +45,6 @@ KEYWORDS = [
     "Feng Wang",
     "Fengcheng Wu",
     "Heonjoon Park",
-    "heterostructure",
     "Hongyi Yu",
     "Imamoglu",
     "Jiaqi Cai",
@@ -67,12 +66,11 @@ KEYWORDS = [
     "Pablo Jarillo-Herrero",
     "Sufei Shi",
     "Takashi Taniguchi",
+    "Yanhao Tang",
     "Ting Cao",
     "TingXin Li",
     "TMD",
     "Tony F. Heinz",
-    "trilayer",
-    "twisted",
     "Weibo Gao",
     "WS2",
     "WSe2",
@@ -370,10 +368,8 @@ def build_email_content(header_text: str, sections: list[ArxivSection]) -> tuple
         matched = [paper for paper in section.papers if paper.matched_keywords]
         lines.extend(
             [
-                f"===== {section.name} =====",
-                f"页面显示: {section.heading}",
-                f"本部分共解析到 {len(section.papers)} 篇；页面标注 showing {section.shown_entries} of {section.total_entries} entries。",
-                f"关键词命中: {len(matched)} 篇",
+                f"====={section.name}=====",
+                f"关键词命中：{len(matched)}/{section.total_entries}",
                 "",
             ]
         )
