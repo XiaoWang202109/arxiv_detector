@@ -1,5 +1,7 @@
 import argparse
+import copy
 import os
+import re
 import smtplib
 import time
 import unicodedata
@@ -26,63 +28,96 @@ EMAIL_TO_2 = os.environ.get("EMAIL_TO_CRK")
 SMTP_SERVER = "smtp.qq.com"
 SMTP_PORT = 465
 
-# 之后想到新的关键词，直接追加到这个列表里即可。
+# 之后想到新的关键词，直接追加到这个列表里即可。列表按首字母排序，方便查找。
 KEYWORDS = [
-    "TMD",
-    "MoSe2",
-    "WSe2",
-    "MoTe2",
-    "WS2",
-    "MoS2",
-    "moire",
-    "Yao Wang",
+    "Allan H. MacDonald",
+    "Andrea F. Young",
+    "Anlian Pan",
+    "Brian D. Gerardot",
+    "Brian D.Gerardot",
+    "Chenhao Jin",
+    "Chih-Kang Shih",
+    "Chun Hung Lui",
+    "Di Xiao",
+    "Eric Anderson",
+    "Erfu Liu",
+    "Eslam Khalaf",
+    "Feng Wang",
+    "Fengcheng Wu",
+    "Heonjoon Park",
+    "heterostructure",
+    "Hongyi Yu",
+    "Imamoglu",
+    "Jiaqi Cai",
+    "Jie Shan",
+    "jie gu",
+    "Jun Yan",
+    "Kaifei Kang",
     "kenji",
     "Kenji Watanabe",
-    "Takashi Taniguchi",
-    "jie gu",
-    "xiaodong xu",
     "Kin Fai Mak",
-    "Jie Shan",
-    "Feng Wang",
-    "Allan H. MacDonald",
-    "MacDonald",
-    "Fengcheng Wu",
-    "Xiaoyang Zhu",
-    "Sufei Shi",
-    "YongTao Cui",
-    "Chenhao Jin",
-    "Jun Yan",
-    "Di Xiao",
     "Liang Fu",
-    "Hongyi Yu",
-    "Ting Cao",
     "Libai Huang",
-    "Anlian Pan",
-    "Brian D.Gerardot",
-    "Brian D. Gerardot",
-    "Imamoglu",
-    "Chun Hung Lui",
-    "Tony F. Heinz",
     "Long Ju",
-    "TingXin Li",
-    "Kaifei Kang",
-    "Weibo Gao",
-    "Andrea F. Young",
-    "Eric Anderson",
-    "Jiaqi Cai",
-    "Heonjoon Park",
-    "Xiaoxue Liu",
-    "Yuanbo Zhang",
-    "Ziliang Ye",
-    "Erfu Liu",
+    "MacDonald",
+    "moire",
+    "MoS2",
+    "MoSe2",
+    "MoTe2",
     "Pablo Jarillo-Herrero",
-    "Chih-Kang Shih",
-    "Xiaoqin Li",
-    "Yimo Han"
-    "Eslam Khalaf",
+    "Sufei Shi",
+    "Takashi Taniguchi",
+    "Ting Cao",
+    "TingXin Li",
+    "TMD",
+    "Tony F. Heinz",
     "trilayer",
     "twisted",
+    "Weibo Gao",
+    "WS2",
+    "WSe2",
+    "Xiaodong Xu",
+    "Xiaoqin Li",
+    "Xiaoxue Liu",
+    "Xiaoyang Zhu",
+    "Yao Wang",
+    "Yimo Han",
+    "YongTao Cui",
+    "Yuanbo Zhang",
+    "Ziliang Ye",
 ]
+
+
+SUBSCRIPT_TRANSLATION = str.maketrans(
+    {
+        "₀": "0",
+        "₁": "1",
+        "₂": "2",
+        "₃": "3",
+        "₄": "4",
+        "₅": "5",
+        "₆": "6",
+        "₇": "7",
+        "₈": "8",
+        "₉": "9",
+        "⁰": "0",
+        "¹": "1",
+        "²": "2",
+        "³": "3",
+        "⁴": "4",
+        "⁵": "5",
+        "⁶": "6",
+        "⁷": "7",
+        "⁸": "8",
+        "⁹": "9",
+    }
+)
+
+SECTION_NAMES = {
+    "new submissions": "New submissions",
+    "cross submissions": "Cross submissions",
+    "replacement submissions": "Replacement submissions",
+}
 
 
 @dataclass
@@ -97,11 +132,20 @@ class ArxivPaper:
     matched_keywords: list[str]
 
 
+@dataclass
+class ArxivSection:
+    name: str
+    heading: str
+    total_entries: int
+    shown_entries: int
+    papers: list[ArxivPaper]
+
+
 def fetch_soup() -> BeautifulSoup:
     response = requests.get(
         URL,
         timeout=30,
-        headers={"User-Agent": "arxiv-cond-mat-monitor/1.0"},
+        headers={"User-Agent": "arxiv-cond-mat-monitor/2.0"},
     )
     response.raise_for_status()
     return BeautifulSoup(response.text, "html.parser")
@@ -112,12 +156,19 @@ def parse_header_date(header_text: str):
     return datetime.strptime(date_str, "%A, %d %B %Y").date()
 
 
+def get_listing_header(soup: BeautifulSoup):
+    for header in soup.find_all("h3"):
+        text = header.get_text(" ", strip=True)
+        if text.startswith("Showing new listings for "):
+            return text
+    return None
+
+
 def get_today_update_status(soup: BeautifulSoup):
-    header = soup.find("h3")
-    if not header:
+    header_text = get_listing_header(soup)
+    if not header_text:
         return False, None
 
-    header_text = header.get_text(" ", strip=True)
     try:
         header_date = parse_header_date(header_text)
         today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
@@ -150,25 +201,54 @@ def unique_keep_order(items: Iterable[str]) -> list[str]:
 
 
 def normalize_for_search(text: str) -> str:
-    normalized = unicodedata.normalize("NFKD", text.casefold())
-    return "".join(char for char in normalized if not unicodedata.combining(char))
+    text = text.translate(SUBSCRIPT_TRANSLATION)
+    text = unicodedata.normalize("NFKD", text.casefold())
+    return "".join(char for char in text if not unicodedata.combining(char))
+
+
+def compact_formula_text(text: str) -> str:
+    text = normalize_for_search(text)
+    text = re.sub(r"\\[a-zA-Z]+", "", text)
+    text = re.sub(r"[\s_\$\{\}\^\(\)\[\],.;:~`'\"+-]+", "", text)
+    return text
 
 
 def find_keywords(search_text: str) -> list[str]:
-    lowered = normalize_for_search(search_text)
-    return unique_keep_order(
-        keyword for keyword in KEYWORDS if normalize_for_search(keyword) in lowered
-    )
+    normalized_text = normalize_for_search(search_text)
+    compact_text = compact_formula_text(search_text)
+
+    matched = []
+    for keyword in KEYWORDS:
+        normalized_keyword = normalize_for_search(keyword)
+        compact_keyword = compact_formula_text(keyword)
+        if normalized_keyword in normalized_text or compact_keyword in compact_text:
+            matched.append(keyword)
+
+    return unique_keep_order(matched)
 
 
-def parse_papers(soup: BeautifulSoup) -> list[ArxivPaper]:
-    dl = soup.find("dl")
+def parse_section_counts(heading: str) -> tuple[int | None, int | None]:
+    match = re.search(r"showing\s+(\d+)\s+of\s+(\d+)\s+entries", heading, re.IGNORECASE)
+    if not match:
+        return None, None
+    return int(match.group(1)), int(match.group(2))
+
+
+def parse_section_name(heading: str) -> str | None:
+    lowered = heading.casefold()
+    for key, name in SECTION_NAMES.items():
+        if key in lowered:
+            return name
+    return None
+
+
+def parse_papers_from_dl(dl) -> list[ArxivPaper]:
     if not dl:
         return []
 
     papers = []
     seen_arxiv_ids = set()
-    entries = zip(dl.find_all("dt"), dl.find_all("dd"))
+    entries = zip(dl.find_all("dt", recursive=False), dl.find_all("dd", recursive=False))
 
     for dt, dd in entries:
         index_link = dt.find("a", href=False)
@@ -192,12 +272,12 @@ def parse_papers(soup: BeautifulSoup) -> list[ArxivPaper]:
         )
         authors = authors_tag.get_text(" ", strip=True) if authors_tag else ""
 
-        abstract_parts = []
-        for tag in dd.find_all(class_=["list-comments", "list-journal-ref", "list-subjects"]):
+        dd_for_abstract = copy.deepcopy(dd)
+        for tag in dd_for_abstract.find_all(
+            class_=["list-title", "list-authors", "list-comments", "list-journal-ref", "list-subjects"]
+        ):
             tag.extract()
-        for text in dd.stripped_strings:
-            abstract_parts.append(text)
-        abstract_text = " ".join(abstract_parts)
+        abstract_text = " ".join(dd_for_abstract.stripped_strings)
 
         search_text = f"{title}\n{authors}\n{abstract_text}"
         matched_keywords = find_keywords(search_text)
@@ -218,39 +298,87 @@ def parse_papers(soup: BeautifulSoup) -> list[ArxivPaper]:
     return papers
 
 
-def build_email_content(header_text: str, papers: list[ArxivPaper]) -> tuple[str, str]:
-    matched = [paper for paper in papers if paper.matched_keywords]
+def parse_sections(soup: BeautifulSoup) -> list[ArxivSection]:
+    sections = []
+    seen_section_names = set()
 
-    if matched:
-        subject = f"ArXiv cond-mat 今日更新，关键词命中 {len(matched)} 篇"
+    for header in soup.find_all("h3"):
+        heading = header.get_text(" ", strip=True)
+        section_name = parse_section_name(heading)
+        if not section_name or section_name in seen_section_names:
+            continue
+
+        dl = header.find_next_sibling("dl")
+        papers = parse_papers_from_dl(dl)
+        shown_entries, total_entries = parse_section_counts(heading)
+
+        sections.append(
+            ArxivSection(
+                name=section_name,
+                heading=heading,
+                shown_entries=shown_entries if shown_entries is not None else len(papers),
+                total_entries=total_entries if total_entries is not None else len(papers),
+                papers=papers,
+            )
+        )
+        seen_section_names.add(section_name)
+
+    return sections
+
+
+def build_email_content(header_text: str, sections: list[ArxivSection]) -> tuple[str, str]:
+    total_papers = sum(len(section.papers) for section in sections)
+    matched_papers = [
+        paper
+        for section in sections
+        for paper in section.papers
+        if paper.matched_keywords
+    ]
+
+    if matched_papers:
+        subject = f"ArXiv cond-mat 今日更新，关键词命中 {len(matched_papers)} 篇"
     else:
         subject = "ArXiv cond-mat 今日有更新，但暂无关键词命中"
 
     lines = [
         f"更新标题: {header_text}",
         f"页面链接: {URL}",
-        f"本次共解析到 {len(papers)} 篇新文献。",
+        f"本次共解析到 {total_papers} 篇文献。",
         "",
     ]
 
-    if not matched:
-        lines.append("已检测到今日更新，但没有文献命中当前关键词列表。")
-        return subject, "\n".join(lines)
-
-    lines.append("命中关键词的文献如下：")
-    lines.append("")
-    for number, paper in enumerate(matched, start=1):
+    for section in sections:
+        matched = [paper for paper in section.papers if paper.matched_keywords]
         lines.extend(
             [
-                f"{number}. {paper.index} arXiv:{paper.arxiv_id}",
-                f"标题: {paper.title}",
-                f"作者: {paper.authors}",
-                f"命中关键词: {', '.join(paper.matched_keywords)}",
-                f"PDF: {paper.pdf_url}",
-                f"摘要页: {paper.abs_url}",
+                f"===== {section.name} =====",
+                f"页面显示: {section.heading}",
+                f"本部分共解析到 {len(section.papers)} 篇；页面标注 showing {section.shown_entries} of {section.total_entries} entries。",
+                f"关键词命中: {len(matched)} 篇",
                 "",
             ]
         )
+
+        if not matched:
+            lines.append("本部分暂无关键词命中。")
+            lines.append("")
+            continue
+
+        for number, paper in enumerate(matched, start=1):
+            lines.extend(
+                [
+                    f"{number}. {paper.index} arXiv:{paper.arxiv_id}",
+                    f"标题: {paper.title}",
+                    f"作者: {paper.authors}",
+                    f"命中关键词: {', '.join(paper.matched_keywords)}",
+                    f"PDF: {paper.pdf_url}",
+                    f"摘要页: {paper.abs_url}",
+                    "",
+                ]
+            )
+
+    if not sections:
+        lines.append("已检测到今日更新，但没有解析到 New/Cross/Replacement 分区。")
 
     return subject, "\n".join(lines).strip()
 
@@ -286,7 +414,7 @@ def check_once():
     has_update, header_text = get_today_update_status(soup)
     if not has_update:
         return False, header_text, []
-    return True, header_text, parse_papers(soup)
+    return True, header_text, parse_sections(soup)
 
 
 def main():
@@ -301,8 +429,8 @@ def main():
     if args.test_send:
         soup = fetch_soup()
         _, header_text = get_today_update_status(soup)
-        papers = parse_papers(soup)
-        subject, content = build_email_content(header_text or "arXiv cond-mat 当前页面", papers)
+        sections = parse_sections(soup)
+        subject, content = build_email_content(header_text or "arXiv cond-mat 当前页面", sections)
         send_email("[测试] " + subject, content)
         return
 
@@ -315,14 +443,14 @@ def main():
 
     while (datetime.now() - start_time).total_seconds() < RUN_LIMIT:
         try:
-            has_update, header_text, papers = check_once()
+            has_update, header_text, sections = check_once()
         except Exception as exc:
             print(f"[{datetime.now()}] 检查失败，等待下一次重试: {exc}")
             time.sleep(CHECK_INTERVAL)
             continue
 
         if has_update and not already_sent:
-            subject, content = build_email_content(header_text, papers)
+            subject, content = build_email_content(header_text, sections)
             send_email(subject, content)
             already_sent = True
             break
