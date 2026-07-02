@@ -221,7 +221,10 @@ def find_keywords(search_text: str) -> list[str]:
     for keyword in KEYWORDS:
         normalized_keyword = normalize_for_search(keyword)
         compact_keyword = compact_formula_text(keyword)
-        if normalized_keyword in normalized_text or compact_keyword in compact_text:
+        is_formula_keyword = any(char.isdigit() for char in compact_keyword)
+        if normalized_keyword in normalized_text or (
+            is_formula_keyword and compact_keyword in compact_text
+        ):
             matched.append(keyword)
 
     return unique_keep_order(matched)
@@ -242,13 +245,9 @@ def parse_section_name(heading: str) -> str | None:
     return None
 
 
-def parse_papers_from_dl(dl) -> list[ArxivPaper]:
-    if not dl:
-        return []
-
+def parse_papers_from_entries(entries) -> list[ArxivPaper]:
     papers = []
     seen_arxiv_ids = set()
-    entries = zip(dl.find_all("dt", recursive=False), dl.find_all("dd", recursive=False))
 
     for dt, dd in entries:
         index_link = dt.find("a", href=False)
@@ -298,6 +297,26 @@ def parse_papers_from_dl(dl) -> list[ArxivPaper]:
     return papers
 
 
+def collect_section_entries(header) -> list[tuple]:
+    entries = []
+    current_dt = None
+    node = header.find_next_sibling()
+
+    while node:
+        if node.name == "h3" and parse_section_name(node.get_text(" ", strip=True)):
+            break
+
+        if node.name == "dt":
+            current_dt = node
+        elif node.name == "dd" and current_dt is not None:
+            entries.append((current_dt, node))
+            current_dt = None
+
+        node = node.find_next_sibling()
+
+    return entries
+
+
 def parse_sections(soup: BeautifulSoup) -> list[ArxivSection]:
     sections = []
     seen_section_names = set()
@@ -308,8 +327,8 @@ def parse_sections(soup: BeautifulSoup) -> list[ArxivSection]:
         if not section_name or section_name in seen_section_names:
             continue
 
-        dl = header.find_next_sibling("dl")
-        papers = parse_papers_from_dl(dl)
+        entries = collect_section_entries(header)
+        papers = parse_papers_from_entries(entries)
         shown_entries, total_entries = parse_section_counts(heading)
 
         sections.append(
