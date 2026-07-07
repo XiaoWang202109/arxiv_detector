@@ -19,7 +19,7 @@ from bs4 import BeautifulSoup
 # ==== 用户设置 ====
 URL = "https://arxiv.org/list/cond-mat/new"
 CHECK_INTERVAL = 120
-RUN_LIMIT = 6 * 60 * 60  # 最多运行6小时
+RUN_LIMIT = 5 * 60 * 60 + 55 * 60  # 最多运行5小时55分钟，给最后发送提示邮件留缓冲
 
 EMAIL_FROM = os.environ.get("EMAIL_FROM")  # 你的 QQ 邮箱账号，用来登录 SMTP
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
@@ -474,7 +474,16 @@ def main():
         time.sleep(CHECK_INTERVAL)
 
     if not already_sent:
-        send_email("ArXiv 当天更新检测结果", "截至运行时间上限，未检测到今日更新。")
+        subject = "ArXiv cond-mat 今日未更新提醒"
+        content = (
+            "脚本已经接近 6 小时运行上限，仍未检测到 arXiv cond-mat 今日更新。\n\n"
+            f"检测页面: {URL}\n"
+            f"开始时间: {start_time}\n"
+            f"结束时间: {datetime.now()}\n"
+            f"北京时间: {datetime.now(ZoneInfo('Asia/Shanghai'))}\n\n"
+            "因此今天没有发送关键词命中文献列表。"
+        )
+        send_email(subject, content)
 
 
 if __name__ == "__main__":
