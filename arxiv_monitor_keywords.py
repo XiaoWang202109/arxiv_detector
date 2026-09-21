@@ -30,6 +30,14 @@ EMAIL_TO_2 = os.environ.get("EMAIL_TO_CRK")
 SMTP_SERVER = "smtp.qq.com"
 SMTP_PORT = 465
 
+# 命中关键词的 PDF 会保存到这里。可通过环境变量 ARXIV_DOWNLOAD_DIR 修改。
+DOWNLOAD_DIR = Path(
+    os.environ.get(
+        "ARXIV_DOWNLOAD_DIR",
+        Path(__file__).resolve().parent / "downloads",
+    )
+)
+
 # 之后想到新的关键词，直接追加到这个列表里即可。列表按首字母排序，方便查找。
 KEYWORDS = [
     "Allan H. MacDonald",
@@ -130,6 +138,8 @@ class ArxivPaper:
     abs_url: str
     pdf_url: str
     matched_keywords: list[str]
+    download_path: str | None = None
+    download_error: str | None = None
 
 
 @dataclass
@@ -345,6 +355,146 @@ def parse_sections(soup: BeautifulSoup) -> list[ArxivSection]:
     return sections
 
 
+def clean_pdf_title(title: str) -> str:
+    """按 DownloadPaper3.1_gpt 的规则清理标题，使其可作 Windows 文件名。"""
+    title = html.unescape(title)
+    title = re.sub(r"&lt;.*?&gt;", "", title)
+    title = re.sub(r"<[^>]*>", "", title)
+    title = re.sub(r"\\(?:mathrm|ensuremath)", "", title)
+    title = re.sub(r"(?:mathrm|ensuremath)", "", title)
+    title = title.replace("$_", "").replace("}_", "")
+    title = title.replace(r"\text{", "").replace("text{", "")
+    title = title.replace("/", "-")
+    title = re.sub(r"[$\{\}]", "", title)
+    title = re.sub(r'[<>:"/\\|?*]', "", title)
+    title = re.sub(r"[\x00-\x1f\x7f]", "", title)
+    title = re.sub(r"\s+", " ", title).strip(" .")
+    return title or "Untitled"
+
+
+def normalize_paper_date(date_text: str) -> str:
+    date_text = html.unescape(date_text).strip()
+    match = re.match(r"^(\d{4})[/-](\d{1,2})[/-](\d{1,2})", date_text)
+    if match:
+        year, month, day = (int(part) for part in match.groups())
+        return f"{year:04d}-{month:02d}-{day:02d}"
+
+    for date_format in ("%d %B %Y", "%d %b %Y", "%B %d, %Y", "%b %d, %Y"):
+        try:
+            return datetime.strptime(date_text, date_format).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+
+    return date_text.replace("/", "-")
+
+
+def fetch_download_metadata(
+    paper: ArxivPaper,
+    session: requests.Session,
+) -> tuple[str, str]:
+    """读取参考脚本使用的 citation_title 和 citation_online_date。"""
+    with session.get(paper.abs_url, timeout=30) as response:
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
+
+    title_tag = soup.find("meta", attrs={"name": "citation_title"})
+    title = title_tag.get("content", "").strip() if title_tag else ""
+    title = title or paper.title
+
+    date_text = ""
+    for meta_name in ("citation_online_date", "citation_date"):
+        date_tag = soup.find("meta", attrs={"name": meta_name})
+        if date_tag and date_tag.get("content"):
+            date_text = date_tag["content"]
+            break
+
+    if not date_text:
+        submitted = soup.find(class_="submission-history")
+        if submitted:
+            match = re.search(
+                r"Submitted\s+on\s+(\d{1,2}\s+[A-Za-z]+\s+\d{4})",
+                submitted.get_text(" ", strip=True),
+            )
+            if match:
+                date_text = match.group(1)
+
+    if not date_text:
+        # 元数据异常时仍给出稳定名称，至少保留 arXiv 编号中的年月。
+        id_match = re.match(r"(\d{2})(\d{2})\.", paper.arxiv_id)
+        date_text = f"20{id_match.group(1)}-{id_match.group(2)}" if id_match else "unknown-date"
+
+    return clean_pdf_title(title), normalize_paper_date(date_text)
+
+
+def make_pdf_filename(title: str, online_date: str) -> str:
+    """生成“日期 - arXiv - 标题.pdf”，与参考脚本的 arXiv 规则一致。"""
+    prefix = f"{online_date} - arXiv - "
+    suffix = ".pdf"
+    # 给 Windows 完整路径和临时文件扩展名留出余量。
+    max_filename_length = 220
+    max_title_length = max_filename_length - len(prefix) - len(suffix)
+    safe_title = clean_pdf_title(title)[:max_title_length].rstrip(" .")
+    return f"{prefix}{safe_title or 'Untitled'}{suffix}"
+
+
+def download_paper(paper: ArxivPaper, session: requests.Session) -> Path:
+    title, online_date = fetch_download_metadata(paper, session)
+    destination = DOWNLOAD_DIR / make_pdf_filename(title, online_date)
+    DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+    if destination.exists():
+        print(f"PDF 已存在，跳过下载：{destination.name}")
+        return destination
+
+    temporary = destination.with_suffix(destination.suffix + ".part")
+    try:
+        with session.get(
+            paper.pdf_url.split("#", 1)[0],
+            timeout=60,
+            stream=True,
+        ) as response:
+            response.raise_for_status()
+            with temporary.open("wb") as pdf_file:
+                first_chunk = True
+                for chunk in response.iter_content(chunk_size=1024 * 128):
+                    if not chunk:
+                        continue
+                    if first_chunk and not chunk.lstrip().startswith(b"%PDF"):
+                        raise ValueError("服务器返回的内容不是 PDF")
+                    first_chunk = False
+                    pdf_file.write(chunk)
+                if first_chunk:
+                    raise ValueError("服务器返回了空文件")
+            temporary.replace(destination)
+    except Exception:
+        if temporary.exists():
+            temporary.unlink()
+        raise
+
+    print(f"PDF 下载完成：{destination}")
+    return destination
+
+
+def download_matched_papers(sections: list[ArxivSection]):
+    matched_papers = [
+        paper
+        for section in sections
+        for paper in section.papers
+        if paper.matched_keywords
+    ]
+    if not matched_papers:
+        return
+
+    with requests.Session() as session:
+        session.headers.update({"User-Agent": "arxiv-cond-mat-monitor/2.0"})
+        for paper in matched_papers:
+            try:
+                paper.download_path = str(download_paper(paper, session))
+            except Exception as exc:
+                paper.download_error = str(exc)
+                print(f"PDF 下载失败（arXiv:{paper.arxiv_id}）：{exc}")
+
+
 def build_email_content(header_text: str, sections: list[ArxivSection]) -> tuple[str, str]:
     total_papers = sum(len(section.papers) for section in sections)
     matched_papers = [
@@ -390,9 +540,13 @@ def build_email_content(header_text: str, sections: list[ArxivSection]) -> tuple
                     f"命中关键词: {', '.join(paper.matched_keywords)}",
                     f"PDF: {paper.pdf_url}",
                     f"摘要页: {paper.abs_url}",
-                    "",
                 ]
             )
+            if paper.download_path:
+                lines.append(f"已下载: {paper.download_path}")
+            elif paper.download_error:
+                lines.append(f"下载失败: {paper.download_error}")
+            lines.append("")
 
     if not sections:
         lines.append("已检测到今日更新，但没有解析到 New/Cross/Replacement 分区。")
@@ -441,6 +595,11 @@ def main():
         action="store_true",
         help="抓取当前页面并立即发送一封测试邮件，不检查是否为当天更新。",
     )
+    parser.add_argument(
+        "--no-download",
+        action="store_true",
+        help="只检查和发送邮件，不下载命中关键词的 PDF。",
+    )
     args = parser.parse_args()
 
     if args.test_send:
@@ -467,6 +626,8 @@ def main():
             continue
 
         if has_update and not already_sent:
+            if not args.no_download:
+                download_matched_papers(sections)
             subject, content = build_email_content(header_text, sections)
             send_email(subject, content)
             already_sent = True
@@ -476,16 +637,7 @@ def main():
         time.sleep(CHECK_INTERVAL)
 
     if not already_sent:
-        subject = "ArXiv cond-mat 今日未更新提醒"
-        content = (
-            "脚本已经接近 6 小时运行上限，仍未检测到 arXiv cond-mat 今日更新。\n\n"
-            f"检测页面: {URL}\n"
-            f"开始时间: {start_time}\n"
-            f"结束时间: {datetime.now()}\n"
-            f"北京时间: {datetime.now(ZoneInfo('Asia/Shanghai'))}\n\n"
-            "因此今天没有发送关键词命中文献列表。"
-        )
-        send_email(subject, content)
+        send_email("ArXiv 当天更新检测结果", "截至运行时间上限，未检测到今日更新。")
 
 
 if __name__ == "__main__":
