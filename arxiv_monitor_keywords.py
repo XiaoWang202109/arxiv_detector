@@ -1,5 +1,6 @@
 import argparse
 import copy
+import html
 import os
 import re
 import smtplib
@@ -8,6 +9,7 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
 from email.mime.text import MIMEText
+from pathlib import Path
 from typing import Iterable
 from urllib.parse import urljoin
 from zoneinfo import ZoneInfo
